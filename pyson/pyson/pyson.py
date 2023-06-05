@@ -23,8 +23,8 @@ class TokenType(Enum):
 
 @dataclass(frozen=True)
 class Token:
-    type: TokenType | None
-    value: str
+    type: TokenType
+    value: str | None = None
 
 
 WHITESPACE = set(" \b\t\r\n\f")
@@ -42,22 +42,22 @@ def lex(json: str) -> list[Token]:
         value = json[i]
         match value:
             case "{":
-                tokens.append(Token(TokenType.L_CURLY, value))
+                tokens.append(Token(TokenType.L_CURLY))
                 i += 1
             case "}":
-                tokens.append(Token(TokenType.R_CURLY, value))
+                tokens.append(Token(TokenType.R_CURLY))
                 i += 1
             case "[":
-                tokens.append(Token(TokenType.L_BRACKET, value))
+                tokens.append(Token(TokenType.L_BRACKET))
                 i += 1
             case "]":
-                tokens.append(Token(TokenType.R_BRACKET, value))
+                tokens.append(Token(TokenType.R_BRACKET))
                 i += 1
             case ":":
-                tokens.append(Token(TokenType.COLON, value))
+                tokens.append(Token(TokenType.COLON))
                 i += 1
             case ",":
-                tokens.append(Token(TokenType.COMMA, value))
+                tokens.append(Token(TokenType.COMMA))
                 i += 1
             case "t":
                 true = json[i : i + 4]
@@ -78,42 +78,31 @@ def lex(json: str) -> list[Token]:
                 tokens.append(Token(TokenType.NULL, "null"))
                 i += 4
             case '"':
-                string = ""
                 idx = i + 1
                 while json:
                     v = json[idx]
                     match v:
                         case '"':
                             idx += 1
+                            string = (
+                                json[i:idx]
+                                .replace("\\\\", "\\")
+                                .replace('\\"', '"')
+                                .replace("\\/", "/")
+                                .replace("\\b", "\b")
+                                .replace("\\f", "\f")
+                                .replace("\\n", "\n")
+                                .replace("\\r", "\r")
+                                .replace("\\t", "\t")
+                                .replace("\\u", "u")
+                            )
                             i = idx
                             tokens.append(Token(TokenType.STRING, string))
                             break
                         case "\\":
                             n = json[idx + 1]
                             match n:
-                                case '"':
-                                    string += '"'
-                                    idx += 2
-                                case "\\":
-                                    string += "\\"
-                                    idx += 2
-                                case "/":
-                                    string += "/"
-                                    idx += 2
-                                case "b":
-                                    string += "\b"
-                                    idx += 2
-                                case "f":
-                                    string += "\f"
-                                    idx += 2
-                                case "n":
-                                    string += "\n"
-                                    idx += 2
-                                case "r":
-                                    string += "\r"
-                                    idx += 2
-                                case "t":
-                                    string += "\t"
+                                case '"' | "\\" | "/" | "b" | "f" | "n" | "r" | "t":
                                     idx += 2
                                 case "u":
                                     unicodes = json[idx + 2 : idx + 6]
@@ -125,12 +114,10 @@ def lex(json: str) -> list[Token]:
                                         and hx4 in HEXDIGITS
                                     ):
                                         raise ValueError("Invalid unicode sequence")
-                                    string += f"u{unicodes}"
                                     idx += 6
                                 case _:
                                     raise ValueError("Invalid string escaping")
                         case _:
-                            string += v
                             idx += 1
             case _ as v if v in NUMERIC:
                 start = i
@@ -158,6 +145,7 @@ class Parser:
                 value = v.value
             case TokenType.NUMBER:
                 self.i += 1
+                assert v.value  # mypy fix
                 as_float = float(v.value)
                 value = as_float if "." in v.value else int(as_float)
             case TokenType.L_CURLY:
@@ -191,6 +179,7 @@ class Parser:
                     break
                 case TokenType.STRING:
                     key = self.tokens[self.i].value
+                    assert key  # mypy fix
                     if key in known_keys:
                         raise ValueError(self._error("Duplicate key found"))
                     known_keys.add(key)
@@ -242,7 +231,7 @@ def loads(json: str) -> JSON:
 
 
 if __name__ == "__main__":
-    with open("/home/dimi/work/poly_glotson/testfiles/large-file.json", "r") as f:
+    with open("/home/dimi/work/poly-glotson/testfiles/large-file.json", "r") as f:
         json = f.read()
 
     _ = loads(json)
