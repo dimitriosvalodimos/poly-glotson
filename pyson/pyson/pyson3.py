@@ -25,7 +25,8 @@ class TokenType(Enum):
 @dataclass(frozen=True)
 class Token:
     type: TokenType
-    value: str | None = None
+    start: int
+    end: int
 
 
 WHITESPACE = set(" \b\t\r\n\f")
@@ -43,40 +44,40 @@ def lex(json: str) -> list[Token]:
         value = json[i]
         match value:
             case "{":
-                tokens.append(Token(TokenType.L_CURLY))
+                tokens.append(Token(TokenType.L_CURLY, i, i + 1))
                 i += 1
             case "}":
-                tokens.append(Token(TokenType.R_CURLY))
+                tokens.append(Token(TokenType.R_CURLY, i, i + 1))
                 i += 1
             case "[":
-                tokens.append(Token(TokenType.L_BRACKET))
+                tokens.append(Token(TokenType.L_BRACKET, i, i + 1))
                 i += 1
             case "]":
-                tokens.append(Token(TokenType.R_BRACKET))
+                tokens.append(Token(TokenType.R_BRACKET, i, i + 1))
                 i += 1
             case ":":
-                tokens.append(Token(TokenType.COLON))
+                tokens.append(Token(TokenType.COLON, i, i + 1))
                 i += 1
             case ",":
-                tokens.append(Token(TokenType.COMMA))
+                tokens.append(Token(TokenType.COMMA, i, i + 1))
                 i += 1
             case "t":
                 true = json[i : i + 4]
                 if true != "true":
                     raise ValueError("Invalid true value")
-                tokens.append(Token(TokenType.BOOLEAN, "true"))
+                tokens.append(Token(TokenType.BOOLEAN, i, i + 4))
                 i += 4
             case "f":
                 false = json[i : i + 5]
                 if false != "false":
                     raise ValueError("Invalid false value")
-                tokens.append(Token(TokenType.BOOLEAN, "false"))
+                tokens.append(Token(TokenType.BOOLEAN, i, i + 5))
                 i += 5
             case "n":
                 null = json[i : i + 4]
                 if null != "null":
                     raise ValueError("Invalid null value")
-                tokens.append(Token(TokenType.NULL, "null"))
+                tokens.append(Token(TokenType.NULL, i, i + 4))
                 i += 4
             case '"':
                 idx = i + 1
@@ -85,20 +86,8 @@ def lex(json: str) -> list[Token]:
                     match v:
                         case '"':
                             idx += 1
-                            string = (
-                                json[i:idx]
-                                .replace("\\\\", "\\")
-                                .replace('\\"', '"')
-                                .replace("\\/", "/")
-                                .replace("\\b", "\b")
-                                .replace("\\f", "\f")
-                                .replace("\\n", "\n")
-                                .replace("\\r", "\r")
-                                .replace("\\t", "\t")
-                                .replace("\\u", "u")
-                            )
+                            tokens.append(Token(TokenType.STRING, i, idx))
                             i = idx
-                            tokens.append(Token(TokenType.STRING, string))
                             break
                         case "\\":
                             n = json[idx + 1]
@@ -125,7 +114,7 @@ def lex(json: str) -> list[Token]:
                 while json[i] in NUMERIC:
                     i += 1
 
-                tokens.append(Token(TokenType.NUMBER, json[start:i]))
+                tokens.append(Token(TokenType.NUMBER, start, i))
             case _:
                 i += 1
 
@@ -137,18 +126,35 @@ class Parser:
         prior_tokens = self.tokens[self.i - 2 : self.i]
         return f"{msg}, {prior_tokens=}, {self.i=}, value={self.tokens[self.i]}"
 
+    def normalized_string(self, t: Token) -> str:
+        return (
+            self.get_string(t)
+            .replace("\\\\", "\\")
+            .replace('\\"', '"')
+            .replace("\\/", "/")
+            .replace("\\b", "\b")
+            .replace("\\f", "\f")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\u", "u")
+        )
+
+    def get_string(self, t: Token) -> str:
+        return self.json[t.start : t.end]
+
     def parse_value(self) -> Value:
         value: Value = None
-        v = self.tokens[self.i]
-        match v.type:
+        t = self.tokens[self.i]
+        match t.type:
             case TokenType.STRING:
                 self.i += 1
-                value = v.value
+                value = self.normalized_string(t)
             case TokenType.NUMBER:
                 self.i += 1
-                assert v.value  # mypy fix
-                as_float = float(v.value)
-                value = as_float if "." in v.value else int(as_float)
+                string = self.get_string(t)
+                as_float = float(string)
+                value = as_float if "." in string else int(as_float)
             case TokenType.L_CURLY:
                 self.i += 1
                 value = self.parse_object()
@@ -157,7 +163,8 @@ class Parser:
                 value = self.parse_array()
             case TokenType.BOOLEAN:
                 self.i += 1
-                value = True if v.value == "true" else False
+                string = self.get_string(t)
+                value = True if string == "true" else False
             case TokenType.NULL:
                 self.i += 1
             case _:
@@ -179,7 +186,7 @@ class Parser:
                     self.i += 1
                     break
                 case TokenType.STRING:
-                    key = self.tokens[self.i].value
+                    key = self.normalized_string(self.tokens[self.i])
                     assert key  # mypy fix
                     if key in known_keys:
                         raise ValueError(self._error("Duplicate key found"))
@@ -209,11 +216,12 @@ class Parser:
                     result.append(self.parse_value())
         return result
 
-    def parse(self, tokens: list[Token]) -> JSON:
-        self.tokens = tokens
-        self.length = len(tokens)
+    def parse(self, json: str) -> JSON:
+        self.tokens = lex(json)
+        self.length = len(self.tokens)
+        self.json = json
 
-        if len(tokens) < 2:
+        if len(self.tokens) < 2:
             raise ValueError(self._error("Too short to be valid"))
 
         self.i = 1
@@ -228,7 +236,7 @@ class Parser:
 
 
 def loads(json: str) -> JSON:
-    return Parser().parse(lex(json))
+    return Parser().parse(json)
 
 
 if __name__ == "__main__":
