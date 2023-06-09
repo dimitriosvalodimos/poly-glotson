@@ -253,14 +253,16 @@ if __name__ == "__main__":
         print("Wow... now you're using Windows?!")
 
     with open(
-        f"{TEST_FILE_PREFIX}/work/poly-glotson/testfiles/large-file.json", "r"
+        f"{TEST_FILE_PREFIX}/work/poly-glotson/testfiles/large-file.json",
+        "r",
+        encoding="utf8",
     ) as f:
-        json = f.read()
+        json_data = f.read()
 
     timing = []
     for _ in range(20):
         start = time()
-        value: JSON = loads(json)
+        value: JSON = loads(json_data)
         timing.append(time() - start)
     print(timing)
     print(sum(timing) / len(timing))
